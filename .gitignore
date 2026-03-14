@@ -151,3 +151,8 @@ data/
 # Rollout videos and wandb logs
 rollouts/
 wandb/
+
+modified_libero_rlds/
+LIBERO/
+
+experiments/robot/act/ckpt

@@ -9,7 +9,7 @@ from enum import Enum
 
 # Llama 2 token constants
 IGNORE_INDEX = -100
-ACTION_TOKEN_BEGIN_IDX = 31743
+ACTION_TOKEN_BEGIN_IDX = 31743 #动作token是从31743开始的，之前的token id都是环境状态和文本token
 STOP_INDEX = 2  # '</s>'
 
 

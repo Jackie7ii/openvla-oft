@@ -2,6 +2,7 @@
 
 import math
 import os
+import time
 
 import imageio
 import numpy as np
@@ -9,10 +10,8 @@ import tensorflow as tf
 from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 
-from experiments.robot.robot_utils import (
-    DATE,
-    DATE_TIME,
-)
+DATE = time.strftime("%Y_%m_%d")
+DATE_TIME = time.strftime("%Y_%m_%d-%H_%M_%S")
 
 
 def get_libero_env(task, model_family, resolution=256):
@@ -44,9 +43,10 @@ def get_libero_wrist_image(obs):
     return img
 
 
-def save_rollout_video(rollout_images, idx, success, task_description, log_file=None):
+def save_rollout_video(rollout_images, idx, success, task_description, log_file=None, save_dir=None):
     """Saves an MP4 replay of an episode."""
-    rollout_dir = f"./rollouts/{DATE}"
+    base_dir = save_dir if save_dir is not None else "."
+    rollout_dir = os.path.join(base_dir, "video")
     os.makedirs(rollout_dir, exist_ok=True)
     processed_task_description = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:50]
     mp4_path = f"{rollout_dir}/{DATE_TIME}--openvla_oft--episode={idx}--success={success}--task={processed_task_description}.mp4"

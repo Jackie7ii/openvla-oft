@@ -15,7 +15,13 @@ def load_rlds_episodes(data_root, task_suite_name):
         episodes = []
         for fname in tqdm(sorted(os.listdir(cache_dir)), desc='[data] loading cache'):
             data = np.load(os.path.join(cache_dir, fname))
-            episodes.append({k: data[k] for k in ['images', 'wrist_images', 'qpos', 'actions']})
+            episodes.append({                                                                                                              
+                'images': data['images'],                                                                                                  
+                'wrist_images': data['wrist_images'],
+                'qpos': data['qpos'],                
+                'actions': data['actions'],                                                                                                
+                'task_name': str(data['task_name']),
+            })
         print(f"[data] loaded {len(episodes)} episodes from cache")
         return episodes
 
@@ -30,6 +36,8 @@ def load_rlds_episodes(data_root, task_suite_name):
 
         steps = episode['steps']
         images, wrist_images, qpos, actions = [], [], [], []
+        first_step = next(iter(steps))
+        task_name = first_step["language_instruction"].numpy().decode('utf-8')
         for step in steps:
             images.append(step['observation']['image'].numpy())
             wrist_images.append(step['observation']['wrist_image'].numpy())
@@ -37,6 +45,7 @@ def load_rlds_episodes(data_root, task_suite_name):
             actions.append(step['action'].numpy())
 
         ep = {
+            'task_name': task_name,
             'images': np.stack(images),
             'wrist_images': np.stack(wrist_images),
             'qpos': np.stack(qpos),
@@ -49,6 +58,7 @@ def load_rlds_episodes(data_root, task_suite_name):
             wrist_images=ep['wrist_images'],
             qpos=ep['qpos'],
             actions=ep['actions'],
+            task_name=np.array(task_name),
         )
 
     print(f"[data] saved {len(episodes)} episodes to cache: {cache_dir}")
@@ -71,7 +81,7 @@ def get_norm_stats(episodes):
     }
 
 class LIBEROEpisodeDataset(Dataset):
-    def __init__(self, episodes, camera_names, num_queries, norm_stats):
+    def __init__(self, episodes, camera_names, num_queries, norm_stats, task_emb_dict):
         super().__init__()
         self.episodes = episodes
         self.camera_names = camera_names
@@ -79,6 +89,7 @@ class LIBEROEpisodeDataset(Dataset):
         self.norm_stats = norm_stats
 
         self.action_dim = episodes[0]['actions'].shape[1]
+        self.task_embs = [torch.from_numpy(task_emb_dict[ep['task_name']]).float() for ep in episodes]
 
         # use all steps
         # lengths = np.array([len(ep['actions']) for ep in episodes])
@@ -122,10 +133,14 @@ class LIBEROEpisodeDataset(Dataset):
         action_data = torch.from_numpy(action_chunk).float()
         is_pad = torch.from_numpy(is_pad)
 
-        return qpos_data, image_data, action_data, is_pad
+        task_emb = self.task_embs[episode_idx]  
 
-def load_data(data_root, task_suite_name, camera_names, num_queries, batch_size_train, batch_size_eval):
+        return qpos_data, image_data, action_data, is_pad, task_emb
+
+def load_data(data_root, task_suite_name, camera_names, num_queries, batch_size_train, batch_size_eval, task_emb_path):
     episodes = load_rlds_episodes(data_root, task_suite_name)
+    task_emb_dict = np.load(task_emb_path, allow_pickle=True).item()
+
     num_episodes = len(episodes)
     indices = np.random.permutation(num_episodes) #suffle episode indices
 
@@ -135,8 +150,8 @@ def load_data(data_root, task_suite_name, camera_names, num_queries, batch_size_
 
     norm_stats = get_norm_stats(train_episodes)
 
-    train_dataset = LIBEROEpisodeDataset(train_episodes, camera_names, num_queries, norm_stats)
-    eval_dataset = LIBEROEpisodeDataset(eval_episodes, camera_names, num_queries, norm_stats)
+    train_dataset = LIBEROEpisodeDataset(train_episodes, camera_names, num_queries, norm_stats, task_emb_dict)
+    eval_dataset = LIBEROEpisodeDataset(eval_episodes, camera_names, num_queries, norm_stats, task_emb_dict)
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, num_workers=4, prefetch_factor=1, pin_memory=True)
     eval_dataloader = DataLoader(eval_dataset, batch_size=batch_size_eval, shuffle=False, num_workers=4, prefetch_factor=1, pin_memory=True)

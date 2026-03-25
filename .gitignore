@@ -155,4 +155,6 @@ wandb/
 modified_libero_rlds/
 LIBERO/
 
-experiments/robot/act/ckpt
+experiments/robot/act/act_ckpt/
+experiments/robot/act/mtact_ckpt/
+MUJOCO_LOG.TXT

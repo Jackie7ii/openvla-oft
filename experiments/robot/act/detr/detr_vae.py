@@ -29,7 +29,7 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 class DETRVAE(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbones, transformer, encoder, action_dim, qpos_dim, num_queries, camera_names):
+    def __init__(self, backbones, transformer, encoder, action_dim, qpos_dim, num_queries, camera_names, multi_task=False, task_emb_dim=384):
         """ Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
@@ -70,9 +70,17 @@ class DETRVAE(nn.Module):
 
         # decoder extra parameters
         self.latent_out_proj = nn.Linear(self.latent_dim, hidden_dim) # project latent sample to embedding
-        self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
+        # self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
 
-    def forward(self, qpos, image, env_state, actions=None, is_pad=None):
+        # task embedding for multi-task learning
+        self.multi_task = multi_task
+        if multi_task:
+            self.additional_pos_embed = nn.Embedding(3, hidden_dim) # if multi-task, we add task embedding as additional input to the transformer
+            self.text_embed_proj = nn.Linear(task_emb_dim, hidden_dim) # project text embedding to hidden dim
+        else:
+            self.additional_pos_embed = nn.Embedding(2, hidden_dim) # if not multi-task, we only have proprio and latent as additional input to the transformer
+
+    def forward(self, qpos, image, env_state, actions=None, is_pad=None, task_emb=None):
         """
         qpos: batch, qpos_dim
         image: batch, num_cam, channel, height, width
@@ -81,6 +89,7 @@ class DETRVAE(nn.Module):
         """
         is_training = actions is not None # train or val
         bs, _ = qpos.shape
+        projected_task_emb = None
         ### Obtain latent z from action sequence
         if is_training:
             # project action sequence to embedding dim, and concat with a CLS token
@@ -105,10 +114,15 @@ class DETRVAE(nn.Module):
             logvar = latent_info[:, self.latent_dim:]
             latent_sample = reparametrize(mu, logvar)
             latent_input = self.latent_out_proj(latent_sample)
+            if self.multi_task and task_emb is not None:
+                projected_task_emb = self.text_embed_proj(task_emb)
+            
         else:
             mu = logvar = None
             latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
             latent_input = self.latent_out_proj(latent_sample)
+            if self.multi_task and task_emb is not None:
+                projected_task_emb = self.text_embed_proj(task_emb)
 
         if self.backbones is not None:
             # Image observation features and position embeddings
@@ -125,7 +139,7 @@ class DETRVAE(nn.Module):
             # fold camera dimension into width dimension
             src = torch.cat(all_cam_features, axis=3)
             pos = torch.cat(all_cam_pos, axis=3)
-            hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
+            hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight, task_emb=projected_task_emb)[0]
         else:
             qpos = self.input_proj_robot_state(qpos)
             env_state = self.input_proj_env_state(env_state)
@@ -247,6 +261,8 @@ def build(args):
         qpos_dim=args.qpos_dim,
         num_queries=args.num_queries,
         camera_names=args.camera_names,
+        multi_task=args.multi_task,
+        task_emb_dim=args.task_emb_dim,
     )
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
